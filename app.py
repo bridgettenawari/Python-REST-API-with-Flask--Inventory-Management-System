@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify # Used to get data input by user
 import requests # Used for API requests
-import sys
 app = Flask(__name__)
 
 items = [
