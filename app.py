@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify # Used to get data input by user
 import requests # Used for API requests
+import sys
 app = Flask(__name__)
 
 items = [
@@ -36,22 +37,62 @@ def add_item():
 
   # Searches through the API using the name the user typed in and the &json=1 ensures data comes back in json format
   url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={data['name']}&json=1"
-  response = requests.get(url) # Requesrs data from the url
-  if response.status_code == 200: # If the response status is 200 (successful) we convert the response to a python dictionary with .json()
-    product_data = response.json()
-    # When searching using search terms the key is "products" but barcode is "product"
-    if product_data.get("products"):
-      product = product_data["products"][0] # Gets first item
-      # Update the new item you were creating with the data you got from the API
-      # Use .get so u can set a default value
-      new_item.update({
-        "status": 1,
-        "product": {
-          "product_name": product.get("product_name", data["name"]),
-          "brands": product.get("brands", "Unknown"),
-          "ingredients_text": product.get("ingredients_text", "Not available")
-          }
-      })
+  try:
+    response = requests.get(url, timeout=5)
+
+    if response.status_code == 200 and "application/json" in response.headers.get("Content-Type", ""):
+      try:
+        product_data = response.json()
+
+        if product_data.get("products"):
+          product = product_data["products"][0]
+          new_item.update({
+              "status": 1,
+              "message": "Product found via OpenFoodFacts",
+              "product": {
+                  "product_name": product.get("product_name", data["name"]),
+                  "brands": product.get("brands", "Unknown"),
+                  "ingredients_text": product.get("ingredients_text", "Not available")
+              }
+              })
+        else:
+          new_item.update({
+            "status": 0,
+            "message": "No product found in OpenFoodFacts",
+            "product": {
+              "product_name": data["name"],
+              "brands": "Unknown",
+              "ingredients_text": "Not available"
+              }
+              })
+      except ValueError as e:
+        app.logger.error(f"OpenFoodFacts JSON error: {e}")
+        app.logger.error(f"Raw response text: {response.text}")
+        new_item.update({
+          "status": 0,
+          "message": "Invalid JSON from OpenFoodFacts",
+          "product": {
+            "product_name": data["name"],
+            "brands": "Unknown",
+            "ingredients_text": "Not available"
+            }
+            })
+      else:
+            raise ValueError(f"Bad response: {response.status_code} {response.headers.get('Content-Type')}")
+
+  except Exception as e:
+        app.logger.error(f"OpenFoodFacts request error: {e}")
+        new_item.update({
+          "status": 0,
+          "message": "OpenFoodFacts API unavailable",
+          "product": {
+            "product_name": data["name"],
+            "brands": "Unknown",
+            "ingredients_text": "Not available"
+            }
+            })
+
+  print("New item being returned:", new_item, flush=True)
 
   items.append(new_item)
   return jsonify(new_item), 201
@@ -83,9 +124,3 @@ def delete_item(id):
   # Returns all remaining items that don't have the same id as the chosen one
   items = [i for i in items if i["id"] != id] # where global is relevant
   return jsonify({"message": "Item deleted", "remaining_items": items}), 200
-
-
-  
-
-          
-
