@@ -1,33 +1,60 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify # Used to get data input by user
+import requests # Used for API requests
 app = Flask(__name__)
 
 items = [
-  {"id": 1, "name": "Fluffy Socks"},
-  {"id": 2, "name": "Black Jeans"},
-  {"id": 3, "name": "Pink Sweater"},
-  {"id": 4, "name": "Baggy White Shirt"},
-  {"id": 5, "name": "Grey Shorts"},
+  {
+  "id": 1,
+  "status": 1,
+  "product": {
+    "product_name": "Organic Almond Milk",
+    "brands": "Silk",
+    "ingredients_text": "Filtered water, almonds, cane sugar"
+  }
+  }
 ]
 @app.route("/inventory", methods=["GET"])
 def get_items():
   return jsonify(items), 200
 
 @app.route("/inventory/<int:id>", methods=["GET"])
-def get_item(id):
+def get_item(id): 
+  # Return the error message outside a loop otherwise it will check the first item then immediately return an error
   for item in items:
     if item["id"] == id:
       return jsonify(item), 200
-  else:
-    message = {"message": "Item not found!"}
-    return jsonify(message), 404
+  return jsonify({"message": "Item not found!"}), 404
     
 @app.route("/inventory", methods=["POST"])
 def add_item():
   data = request.get_json()
+  if not data or "name" not in data:
+    return jsonify({"message":"The key 'name' must be in your request"}), 400
+
   new_id = max((i["id"] for i in items), default=0)+ 1
-  new_item = {"id": new_id, "name": data["name"]}
+  new_item = {"id": new_id}
+
+  # Searches through the API using the name the user typed in and the &json=1 ensures data comes back in json format
+  url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={data['name']}&json=1"
+  response = requests.get(url) # Requesrs data from the url
+  if response.status_code == 200: # If the response status is 200 (successful) we convert the response to a python dictionary with .json()
+    product_data = response.json()
+    # When searching using search terms the key is "products" but barcode is "product"
+    if product_data.get("products"):
+      product = product_data["products"][0] # Gets first item
+      # Update the new item you were creating with the data you got from the API
+      # Use .get so u can set a default value
+      new_item.update({
+        "status": 1,
+        "product": {
+          "product_name": product.get("product_name", data["name"]),
+          "brands": product.get("brands", "Unknown"),
+          "ingredients_text": product.get("ingredients_text", "Not available")
+          }
+      })
+
   items.append(new_item)
-  return jsonify(new_item), 200
+  return jsonify(new_item), 201
 
 @app.route("/inventory/<int:id>", methods=["PATCH"])
 def update_item(id):
@@ -38,27 +65,24 @@ def update_item(id):
   item = next((i for i in items if i["id"] == id), None)
   # If there is no item with that ID, it returns an error message
   if not item:
-    message = {"message": "Item not found!"}
-    return jsonify(message), 404
+    return jsonify({"message": "Item not found!"}), 404
   # If no data was sent retunr error messages
-  if not data:
-    return jsonify({"message":"Cannot return an empty field"}), 404
-  # If data was sent but "name" wasn't there return error message
-  if "name" not in data:
-      return jsonify({"message":"The key 'name' must be in your request"}), 404
-  else:
-      return make_response(jsonify("Item updated", item, 200))
+  if not data or "name" not in data:
+    return jsonify({"message":"The key 'name' must be in your request"}), 400
+
+  item["product"]["product_name"] = data["name"] # Sets the products name to the name the user typed in
+  return jsonify({"message": "Item updated", "item": item}), 200
   
 @app.route("/inventory/<int:id>", methods=["DELETE"])
 def delete_item(id):
   # Using global helps you delete the item from the whole list instead of making a new list in the function
   global items
-  item = next((i for i in items if i["id"] == id))
+  item = next((i for i in items if i["id"] == id), None)
   if not item:
     return jsonify({"message": "Item not found!"}), 404
   # Returns all remaining items that don't have the same id as the chosen one
-  remainders = [i for i in items if i["id"] != id]
-  return make_response(jsonify("Item deleted", remainders, 200))
+  items = [i for i in items if i["id"] != id] # where global is relevant
+  return jsonify({"message": "Item deleted", "remaining_items": items}), 200
 
 
   
